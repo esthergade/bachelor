@@ -1,0 +1,326 @@
+---
+title: "bach_draft"
+author: "etg"
+date: "2024-11-05"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+# install the required packages 
+pacman::p_load(tidyverse, 
+       glue,
+       data.table,
+       dplyr,
+       moments,
+       tidybayes,
+       ggplot2,
+       ggridges,
+       plyr,
+       ellipse,
+       brms,
+       cowplot,
+       viridis)
+
+install.packages("brms")
+
+library(brms)
+
+install.packages("dplyr")
+library(dplyr)
+
+```
+
+
+```{r}
+library(readr)
+# load in data
+df <- read_csv("fixation_data.csv")
+
+```
+
+```{r}
+# adding counts and ration for the modelling 
+df$count_ad <- df$AOI_ad
+df$fixation_total <- df$AOI_ad + df$AOI_control
+df$fixation_ratio <- df$count_ad / df$fixation_total
+
+# adding a threshold = 0.05, to classify attention to the ad
+df$looked_at_ad <- ifelse(df$fixation_ratio > 0.05, 1, 0)
+
+
+```
+
+```{r}
+# creating simple model without the interactions of conditions and contrast 
+m_1 <- bf(count_ad | trials(fixation_total) ~ 0 + Text + Contrast +
+    (1 | Participant_ID) + (1 | Condition))
+
+```
+
+```{r}
+fit_m_4 <- bf(
+  count_ad | trials(fixation_total) ~ Text + Contrast + (Text | Participant_ID) + (Contrast | Condition))
+
+
+```
+
+
+```{r}
+# General model
+model <- bf(
+  count_ad | trials(fixation_total) ~ 0 + Text:Contrast +
+  (0 + Text:Contrast | Participant_ID) +
+  (0 + Text:Contrast | Condition)
+)
+
+```
+
+```{r}
+get_prior(model, data = df, family = binomial(link = "logit"))
+```
+
+
+```{r}
+priors <- c(
+  prior(normal(0, 1), class = "b"),
+  prior(student_t(3, 0, 2.5), class = "sd")
+)
+
+#strengthening the priors due to sample size
+priors_2 <- c(
+  prior(normal(log(0.25), 1), class = "b"),  #log(0.25) g= -0.66
+  prior(normal(0, 1), class = "sd", group = "Condition"),
+  prior(normal(0, 0.5), class = "sd", group = "Participant_ID")
+)
+
+
+priors_3 <- c(
+  prior(normal(log(0.25), 1), class = "b"),  #log(0.25) =  -0.66 
+  prior(student_t(3, 0, 2.5), class = "sd") #from get prior function 
+)
+
+#tightening the prior
+priors_4 <- c(
+  prior(normal(log(0.25), 0.5), class = "b"),  #log(0.25) = -0.66 
+  prior(normal(0, 0.75), class = "sd", group = "Condition") #assumes that group-level standard deviations (variances) are likely small.
+)
+
+priors_5 <- c(
+  prior(normal(log(0.25), 0.5), class = "b"),  #log(0.25) = -0.66 
+  prior(normal(0, 0.75), class = "sd", group = "Condition") #more variance on group-level 
+)
+```
+
+
+
+
+```{r}
+#fitting the priors:
+fit_prior <- brm(
+  count_ad | trials(fixation_total) ~ 0 + Text:Contrast +
+  (0 + Text:Contrast | Participant_ID) +
+  (0 + Text:Contrast | Condition),
+  data = df,  
+  family = binomial(link = "logit"),
+  prior = priors_5,       
+  sample_prior = "only"   # Fit with priors only
+)
+
+
+```
+
+
+
+
+```{r}
+# prior predictive check
+pp_check(fit_prior)
+```
+
+
+```{r}
+# fitting the model
+fit_m_1 <- brm(
+  formula = m_1,
+  family = binomial(link = "logit"),
+  data = df,
+  prior = priors_4,
+  chains = 2,
+  cores = 4
+)
+
+```
+
+
+
+Posterior Predictive Checks:
+```{r}
+pp_check(fit_m_1, ndraws = 100)
+```
+Model with random slopes:
+Interaction effects and random slopes to account for individual-level and condition-level variability in responses
+```{r}
+fit_m_4 <- brm(
+  count_ad | trials(fixation_total) ~ Text + Contrast + (Text | Participant_ID) + (Contrast | Condition),
+  data = df,
+  family = binomial(link = "logit"),
+  prior = priors_4
+)
+
+```
+
+
+
+
+```{r}
+#final model 
+fit_model <- brm(
+  formula = model,
+  data = df,
+  family = binomial(),
+  prior = priors_5,
+  chains = 2,
+  iter = 2000,
+  warmup = 500,
+  cores = parallel::detectCores()
+)
+
+
+```
+
+
+```{r}
+#comparing models with loo_fit
+
+loo_fit_1 <- loo(fit_m_1)
+
+loo_fit_2 <- loo(fit_m_4)
+
+loo_fit_3 <- loo(fit_model)
+
+
+```
+
+```{r}
+# compare models
+loo_comparison <- loo_compare(loo_fit_1, loo_fit_2, loo_fit_3)
+print(loo_comparison)
+
+```
+
+
+
+```{r}
+#Posterior Predictive Checks
+pp_check(fit_model, ndraws = 100)
+
+summary(fit_model)
+plot(fit_model)
+```
+
+
+```{r}
+
+# Extract the conditional effects plot (first effect, for example)
+plot_effect <- plot(effects, points = TRUE)[[1]]
+
+# Customize the color of the lines or points
+plot_effect +
+  scale_color_manual(values = c("TextBold" = "blue", "TextItalic" = "red")) +
+  labs(title = "Customized Conditional Effects", x = "Predictor", y = "Outcome")
+
+```
+
+
+```{r}
+# Model predictions (population estimate + sigma)
+plot(conditional_effects(fit_model, spaghetti = T, method = "predict"), points = T)
+```
+
+
+
+```{r}
+#residual check
+plot(residuals(fit_model), type = "hist")
+
+```
+
+
+```{r}
+
+posterior_summary(fit_model)
+
+# Generate posterior predictions
+posterior <- posterior_predict(fit_model)
+
+# Check dimensions
+dim(posterior)  # Should return something like (3000, 128)
+nrow(df)        # Should return 128
+
+# Compute mean prediction for each observation
+mean_predictions <- colMeans(posterior)  # Summarize over posterior samples
+
+# plot that is not quite excat 
+plot_data <- data.frame(
+  Text = df$Text,
+  Contrast = df$Contrast,
+  Prediction = mean_predictions
+)
+
+
+
+```
+
+
+
+```{r}
+#converting text and contrast to factor and checking the fixed effects of the model 
+df$Text <- as.factor(df$Text)
+df$Contrast <- as.factor(df$Contrast)
+
+fixef(fit_model)
+
+```
+
+
+
+```{r}
+# Hypothesis for the overall effect of Text
+hypothesis_text <- hypothesis(
+  fit_model,
+  "(TextBold:ContrastHigh + TextBold:ContrastLow) / 2 > (TextItalic:ContrastHigh + TextItalic:ContrastLow) / 2"
+)
+
+# Hypothesis for the overall effect of Contrast
+hypothesis_contrast <- hypothesis(
+  fit_model,
+  "(TextBold:ContrastHigh + TextItalic:ContrastHigh) / 2 > (TextBold:ContrastLow + TextItalic:ContrastLow) / 2"
+)
+
+# results
+print(hypothesis_text)
+print(hypothesis_contrast)
+
+
+```
+
+
+
+
+```{r} 
+#testing on participant level  
+hypothesis(fit_model, "hypothesis", group = "Participant_ID", scope = "coef")
+
+hypothesis(fit_model,
+  "(TextBold:ContrastHigh + TextBold:ContrastLow) / 2 > (TextItalic:ContrastHigh + TextItalic:ContrastLow) / 2", group = "Participant_ID", scope = "coef" 
+)
+
+hypothesis(fit_model,
+  "(TextBold:ContrastHigh + TextItalic:ContrastHigh) / 2 > (TextBold:ContrastLow + TextItalic:ContrastLow) / 2", group = "Participant_ID", scope = "coef")
+
+```
+

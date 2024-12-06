@@ -1,0 +1,74 @@
+---
+title: "bachelor_new"
+author: "etg"
+date: "2024-11-04"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+# Load necessary libraries
+library(ggplot2)
+library(dplyr)
+library(tidyr)
+library(readxl)
+
+# Load your data
+data <- read_excel("final_dataframe.xlsx")
+
+
+
+# Prepare data for plotting
+data_long <- data %>%
+  dplyr::select(Participant_ID, Trial, AOI_ad, AOI_control) %>%
+  tidyr::pivot_longer(cols = starts_with("AOI"), names_to = "Condition", values_to = "Value")
+
+
+# Create line plot
+ggplot(data_long, aes(x = Trial, y = Value, color = Condition, group = Condition)) +
+  geom_line() +
+  facet_wrap(~ Participant_ID) +
+  labs(title = "AOI Adfærd for AOI_ad og AOI_control",
+       x = "Trial",
+       y = "AOI Value") +
+  theme_minimal()
+
+```
+
+```{r}
+# Calculate the average AOI values across participants for each trial
+data_long <- df %>%
+  select(Trial, AOI_ad, AOI_control) %>%
+  pivot_longer(cols = starts_with("AOI"), names_to = "Condition", values_to = "Value") %>%
+  group_by(Trial, Condition) %>%
+  summarize(Average_Value = mean(Value, na.rm = TRUE), .groups = 'drop')
+
+# Create line plot
+ggplot(data_long, aes(x = Trial, y = Average_Value, color = Condition, group = Condition)) +
+  geom_line() +
+  labs(title = "Average AOI Values for AOI_ad and AOI_control across Trials",
+       x = "Trial",
+       y = "Average AOI Value") +
+  theme_minimal()
+```
+
+
+```{r}
+df <- data[data$AOI_ad >= 0, ]
+
+# Remove rows with any NA values
+df <- na.omit(df)
+
+# Replace "df" with the name of your DataFrame, and specify the file path
+write.csv(df, "fixation_data.csv", row.names = FALSE)
+
+
+```
+
+
+
+
+
